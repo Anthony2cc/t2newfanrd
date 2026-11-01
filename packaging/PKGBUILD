@@ -1,0 +1,29 @@
+# Maintainer: Anthony2cc <20686706+Anthony2cc@users.noreply.github.com>
+
+pkgname=t2newfanrd
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Patched T2 fan control daemon for the macsmc-hwmon fan_control interface"
+arch=('x86_64')
+url="https://github.com/Anthony2cc/t2newfanrd"
+license=('GPL-3.0-or-later')
+depends=('glibc' 'gcc-libs')
+makedepends=('git' 'rust')
+conflicts=('t2fanrd')
+backup=('etc/t2fand.conf')
+source=("git+https://github.com/Anthony2cc/t2newfanrd.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/t2newfanrd"
+  cargo build --release --locked
+}
+
+package() {
+  cd "$srcdir/t2newfanrd"
+  install -Dm755 target/release/t2fanrd "$pkgdir/usr/bin/t2newfanrd"
+  install -Dm644 LICENCE "$pkgdir/usr/share/licenses/$pkgname/LICENCE"
+  install -Dm644 packaging/t2newfanrd.service \
+    "$pkgdir/usr/lib/systemd/system/t2newfanrd.service"
+  install -Dm644 packaging/t2fand.conf "$pkgdir/etc/t2fand.conf"
+}
