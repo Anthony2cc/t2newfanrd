@@ -1,12 +1,22 @@
 [package]
-name = "t2fanrd"
-version = "0.1.0"
+name = "t2newfanrd"
+version = "0.2.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Simple Fan Daemon for T2 Macs"
+description = "T2 fan control daemon and system tray frontend"
 repository = "https://github.com/Anthony2cc/t2newfanrd"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "t2newfanrd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "t2newfanrd"
+path = "src/main.rs"
+
+[[bin]]
+name = "t2newfanrd-tray"
+path = "src/bin/tray.rs"
 
 [dependencies]
 glob = { version = "0.3.1", default-features = false }
@@ -16,6 +26,8 @@ rust-ini = { version = "0.21.0", default-features = false }
 thiserror = { version = "1.0.50", default-features = false }
 signal-hook = { version = "0.3.17", default-features = false }
 arraydeque = "0.5.1"
+gtk4 = "0.11"
+ksni = { version = "0.3", features = ["blocking"] }
 
 [profile.release]
 lto = "thin"

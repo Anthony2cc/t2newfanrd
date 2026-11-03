@@ -56,6 +56,8 @@ pub enum Error {
 
     #[error("Cannot setup shutdown signals")]
     Signal(#[source] std::io::Error),
+    #[error("Cannot start fan control socket")]
+    ControlSocket(#[source] std::io::Error),
 
     #[error("Programmer Error: Invalid glob pattern")]
     Glob(

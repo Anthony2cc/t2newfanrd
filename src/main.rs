@@ -11,15 +11,16 @@
 
 use std::{
     io::{ErrorKind, Read, Seek},
-    path::PathBuf,
     process::ExitCode,
     sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
 
 use arraydeque::ArrayDeque;
 use fan_controller::FanController;
 use nonempty::NonEmpty as NonEmptyVec;
 use signal_hook::consts::{SIGINT, SIGTERM};
+use t2newfanrd::{hwmon, ipc};
 
 use config::load_fan_configs;
 use error::{Error, Result};
@@ -39,53 +40,6 @@ const PID_FILE: &str = "/run/t2newfanrd.pid";
 fn get_current_euid() -> libc::uid_t {
     // SAFETY: FFI call with no preconditions
     unsafe { libc::geteuid() }
-}
-
-/// Locate all Apple SMC fans through the hwmon interface.
-///
-/// macsmc-hwmon may expose both fans on the same hwmon node, or split them
-/// across several nodes, so every Apple-related hwmon device is scanned and
-/// each `fanX_input` with a writable `fanX_target` sibling is collected.
-fn find_fan_paths() -> Result<NonEmptyVec<PathBuf>> {
-    let mut fans = Vec::new();
-
-    for name_path in glob::glob("/sys/class/hwmon/hwmon*/name")?.filter_map(Result::ok) {
-        let Ok(name) = std::fs::read_to_string(&name_path) else {
-            continue;
-        };
-        let name = name.trim();
-        if !(name.starts_with("macsmc") || name.starts_with("apple")) {
-            continue;
-        }
-
-        let Some(hwmon_dir) = name_path.parent() else {
-            continue;
-        };
-        let fan_glob = hwmon_dir.join("fan*_input").display().to_string();
-
-        for path in glob::glob(&fan_glob)?.filter_map(Result::ok) {
-            let Some(fan_name) = path
-                .file_name()
-                .and_then(|file_name| file_name.to_str())
-                .and_then(|file_name| file_name.strip_suffix("_input"))
-                .map(str::to_owned)
-            else {
-                continue;
-            };
-
-            // Ignore read-only fan entries from drivers without a target knob.
-            if !hwmon_dir.join(format!("{fan_name}_target")).exists() {
-                continue;
-            }
-
-            let mut fan_path = path;
-            fan_path.set_file_name(fan_name);
-            fans.push(fan_path);
-        }
-    }
-
-    fans.sort();
-    NonEmptyVec::from_vec(fans).ok_or(Error::NoFan)
 }
 
 fn check_pid_file() -> Result<()> {
@@ -165,14 +119,15 @@ fn start_temp_loop(
     mut cpu_temp_file: std::fs::File,
     mut gpu_temp_file: Option<std::fs::File>,
     fans: &NonEmptyVec<FanController>,
+    control: ipc::Control,
 ) -> Result<()> {
     let cancellation_token = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(SIGINT, cancellation_token.clone()).map_err(Error::Signal)?;
     signal_hook::flag::register(SIGTERM, cancellation_token.clone()).map_err(Error::Signal)?;
 
-    let mut last_temp = 0;
     let mut temps = ArrayDeque::<u8, 50, arraydeque::Wrapping>::new();
-    let mut was_long_sleep = false;
+    let mut applied: Option<Vec<u32>> = None;
+
     while !cancellation_token.load(std::sync::atomic::Ordering::Relaxed) {
         let cpu_temp = read_temp_file(&mut cpu_temp_file, &mut temp_buffer)?;
         let temp = if let Some(gpu_temp_file) = &mut gpu_temp_file {
@@ -187,26 +142,35 @@ fn start_temp_loop(
         };
 
         temps.push_back(temp);
-        if was_long_sleep {
-            // Avoid messing up the mean due to the longer sleep.
-            for _ in 0..9 {
-                temps.push_back(temp);
-            }
-        }
-
         let sum_temp: u16 = temps.iter().map(|t| *t as u16).sum();
         let mean_temp = sum_temp / (temps.len() as u16);
-        if mean_temp == last_temp {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            was_long_sleep = true;
-        } else {
-            last_temp = mean_temp;
-            for fan in fans {
-                fan.set_speed(fan.calc_speed(mean_temp as u8))?;
-            }
 
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            was_long_sleep = false;
+        let (manual, version) = {
+            let state = control.0.lock().unwrap();
+            (state.targets.clone(), state.version)
+        };
+
+        let desired: Vec<u32> = match manual {
+            Some(targets) if targets.len() == fans.len() => targets,
+            _ => fans
+                .iter()
+                .map(|fan| fan.calc_speed(mean_temp as u8))
+                .collect(),
+        };
+
+        if applied.as_ref() != Some(&desired) {
+            for (fan, speed) in fans.iter().zip(desired.iter().copied()) {
+                fan.set_speed(speed)?;
+            }
+            applied = Some(desired);
+        }
+
+        let guard = control.0.lock().unwrap();
+        if guard.version == version {
+            let _ = control
+                .1
+                .wait_timeout(guard, Duration::from_secs(1))
+                .unwrap();
         }
     }
 
@@ -222,14 +186,18 @@ fn real_main() -> Result<()> {
 
     let mut temp_buffer = String::new();
 
-    let fan_paths = find_fan_paths()?;
+    let fan_paths = NonEmptyVec::from_vec(hwmon::find_fan_paths()).ok_or(Error::NoFan)?;
     let fans = load_fan_configs(fan_paths)?;
     let cpu_temp_file = find_cpu_temp_file(&mut temp_buffer)?;
     let gpu_temp_file = find_gpu_temp_file(&mut temp_buffer)?;
 
+    let control = ipc::new_control();
+    ipc::spawn_server(control.clone(), fans.len()).map_err(Error::ControlSocket)?;
+
     println!();
-    let res = start_temp_loop(temp_buffer, cpu_temp_file, gpu_temp_file, &fans);
+    let res = start_temp_loop(temp_buffer, cpu_temp_file, gpu_temp_file, &fans, control);
     println!("T2 Fan Daemon is shutting down...");
+    let _ = std::fs::remove_file(ipc::SOCKET_PATH);
     for fan in &fans {
         fan.restore()?;
     }

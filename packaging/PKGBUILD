@@ -1,14 +1,14 @@
 # Maintainer: Anthony2cc <20686706+Anthony2cc@users.noreply.github.com>
 
 pkgname=t2newfanrd
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
-pkgdesc="Patched T2 fan control daemon for the macsmc-hwmon fan_control interface"
+pkgdesc="T2 fan control daemon and system tray frontend for macsmc-hwmon"
 arch=('x86_64')
 url="https://github.com/Anthony2cc/t2newfanrd"
 license=('GPL-3.0-or-later')
-depends=('glibc' 'gcc-libs')
-makedepends=('git' 'rust')
+depends=('glibc' 'gcc-libs' 'gtk4')
+makedepends=('git' 'rust' 'pkgconf')
 conflicts=('t2fanrd')
 backup=('etc/t2fand.conf')
 source=("git+https://github.com/Anthony2cc/t2newfanrd.git#tag=v$pkgver")
@@ -21,9 +21,22 @@ build() {
 
 package() {
   cd "$srcdir/t2newfanrd"
-  install -Dm755 target/release/t2fanrd "$pkgdir/usr/bin/t2newfanrd"
+
+  install -Dm755 target/release/t2newfanrd "$pkgdir/usr/bin/t2newfanrd"
+  install -Dm755 target/release/t2newfanrd-tray "$pkgdir/usr/bin/t2newfanrd-tray"
   install -Dm644 LICENCE "$pkgdir/usr/share/licenses/$pkgname/LICENCE"
+
   install -Dm644 packaging/t2newfanrd.service \
     "$pkgdir/usr/lib/systemd/system/t2newfanrd.service"
   install -Dm644 packaging/t2fand.conf "$pkgdir/etc/t2fand.conf"
+
+  install -Dm644 packaging/t2newfanrd-tray.desktop \
+    "$pkgdir/usr/share/applications/t2newfanrd-tray.desktop"
+  install -Dm644 packaging/t2newfanrd-tray-autostart.desktop \
+    "$pkgdir/etc/xdg/autostart/t2newfanrd-tray.desktop"
+
+  install -Dm644 assets/t2newfanrd.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/t2newfanrd.svg"
+  install -Dm644 assets/t2newfanrd-symbolic.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/t2newfanrd-symbolic.svg"
 }

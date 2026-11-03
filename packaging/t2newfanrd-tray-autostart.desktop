@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=T2 Fan Control
+Comment=Control T2 Mac fan speeds from the system tray
+Exec=t2newfanrd-tray --hidden
+Icon=t2newfanrd
+Terminal=false
+X-GNOME-Autostart-enabled=true

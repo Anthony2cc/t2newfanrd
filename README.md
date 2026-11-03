@@ -1,7 +1,8 @@
 # t2newfanrd
 
-A patched fork of [T2FanRD](https://github.com/GnomedDev/T2FanRD) that works with
-the `macsmc-hwmon` fan interface used by newer Linux kernels on T2 Macs.
+A patched fork of [T2FanRD](https://github.com/GnomedDev/T2FanRD) for newer
+Linux kernels on T2 Macs, with an optional system tray frontend for setting
+fan speeds manually.
 
 The original daemon looks for the legacy `apple-ib-tb` files (`fanX_manual` and
 `fanX_output`). Current kernels expose Apple SMC fans through hwmon instead
@@ -10,22 +11,24 @@ disabled unless the `macsmc-hwmon` module is loaded with `fan_control=1`.
 Without these changes the daemon exits at startup and systemd eventually reports
 `start-limit-hit`.
 
-## What changed
+## Features
 
-- Fan discovery through `/sys/class/hwmon/hwmon*/name`, limited to Apple SMC
-  hwmon nodes. Both fans may live on one node or be split across several nodes.
-- Speed control by writing `fanX_target` (RPM) instead of `fanX_manual` /
-  `fanX_output`.
-- The original fan target is saved at startup and restored on SIGTERM/SIGINT.
-- GPU temperature lookup scans every DRM card instead of hardcoding `card0`.
-- Packaged as `t2newfanrd` with its own binary and systemd unit, so a distro
+- Automatic fan curve driven by the higher of the CPU and GPU temperatures.
+- Per-fan system tray sliders for setting any speed between `fanX_min` and
+  `fanX_max`, plus an **Automatic fan curve** switch.
+- Both fans may live on one hwmon node or be split across several nodes.
+- The original fan target is saved at startup and restored on shutdown.
+- Installable as `t2newfanrd` with its own binary and systemd unit, so a distro
   `t2fanrd` package cannot overwrite it.
+- `/etc/t2fand.conf` is compatible with upstream T2FanRD.
 
 ## Requirements
 
 - A T2 Mac running Linux.
 - A kernel with the `macsmc-hwmon` driver (`modinfo macsmc-hwmon`).
 - `macsmc-hwmon` loaded with `fan_control=1`.
+- For the tray frontend: GTK4, and on GNOME the AppIndicator extension
+  (`gnome-shell-extension-appindicator`) enabled.
 
 Enable fan control:
 
@@ -65,6 +68,10 @@ sudo systemctl disable --now t2fanrd
 sudo pacman -Rns t2fanrd
 ```
 
+The package installs the daemon, the tray binary, icons, and an XDG autostart
+entry (`/etc/xdg/autostart/t2newfanrd-tray.desktop`). The tray starts at the next
+login.
+
 ### Manual build
 
 ```bash
@@ -72,10 +79,26 @@ git clone https://github.com/Anthony2cc/t2newfanrd.git
 cd t2newfanrd
 cargo build --release --locked
 
-sudo install -Dm755 target/release/t2fanrd /usr/bin/t2newfanrd
+sudo install -Dm755 target/release/t2newfanrd /usr/bin/t2newfanrd
+sudo install -Dm755 target/release/t2newfanrd-tray /usr/bin/t2newfanrd-tray
 sudo install -Dm644 packaging/t2newfanrd.service /usr/lib/systemd/system/t2newfanrd.service
+sudo install -Dm644 packaging/t2fand.conf /etc/t2fand.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now t2newfanrd
+```
+
+For desktop integration, also install the icons and autostart entry:
+
+```bash
+sudo install -Dm644 assets/t2newfanrd.svg \
+  /usr/share/icons/hicolor/scalable/apps/t2newfanrd.svg
+sudo install -Dm644 assets/t2newfanrd-symbolic.svg \
+  /usr/share/icons/hicolor/scalable/apps/t2newfanrd-symbolic.svg
+sudo install -Dm644 packaging/t2newfanrd-tray.desktop \
+  /usr/share/applications/t2newfanrd-tray.desktop
+sudo install -Dm644 packaging/t2newfanrd-tray-autostart.desktop \
+  /etc/xdg/autostart/t2newfanrd-tray.desktop
+sudo gtk-update-icon-cache /usr/share/icons/hicolor || true
 ```
 
 ### Check status
@@ -85,9 +108,35 @@ systemctl status t2newfanrd
 cat /sys/class/hwmon/hwmon*/fan*_target
 ```
 
+## Usage
+
+Start the tray in the current session (or let it autostart at login):
+
+```bash
+t2newfanrd-tray            # open the control window
+t2newfanrd-tray --hidden   # tray icon only
+```
+
+Clicking the tray icon or choosing **Open fan controls** opens a window with:
+
+- **Automatic fan curve** — the daemon follows `/etc/t2fand.conf`.
+- **Fan sliders** — one per fan, in RPM, clamped to each fan's `min`/`max`
+  values. Moving a slider switches the daemon to manual mode immediately.
+- **Actual speed** — the current `fanX_input` reading next to each slider.
+- **Quit** — closes the tray application; the daemon keeps running.
+
+Manual speeds stay in effect until **Automatic fan curve** is re-enabled or the
+daemon is restarted.
+
+The tray and the daemon communicate over a local Unix socket,
+`/run/t2newfanrd.sock`. The socket is world-writable so the desktop user can use
+it without extra group setup; on a multi-user machine, any local user can change
+fan speeds. Tighten the socket permissions or run the tray only for trusted
+users if that matters to you.
+
 ## Configuration
 
-`/etc/t2fand.conf` is compatible with upstream T2FanRD:
+`/etc/t2fand.conf` is read when the daemon starts and applies to automatic mode:
 
 ```ini
 [Fan1]

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=T2 Fan Control
+GenericName=Fan Control
+Comment=Control T2 Mac fan speeds from the system tray
+Exec=t2newfanrd-tray
+Icon=t2newfanrd
+Terminal=false
+Categories=System;Settings;
+Keywords=fan;thermal;t2;mac;tray;
