@@ -1,4 +1,5 @@
 /target/
 packaging/src/
 packaging/pkg/
+packaging/t2newfanrd/
 packaging/*.pkg.tar.*
